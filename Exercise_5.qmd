@@ -9,14 +9,13 @@ echo: True
 bibliography: bibliography.bib
 ---
 
-```{r}
+```{r, warning=FALSE, message=FALSE}
 library(tidyverse)
 library(sf)
 library(lubridate)
 library(dplyr)
 library(ggplot2)
 library(readr)
-install.packages("plotly")
 library(plotly)
 ```
 
@@ -192,11 +191,11 @@ joined_df <- joined_df |>
       distance = as.numeric(st_distance(locrosa, locsabi, by_element = TRUE)))
 ```
 
-### Apply Threshold of 100m
+### Apply Threshold of 50m
 ```{r}
 joined_df <- joined_df |> 
   mutate(
-    clash = distance < 100
+    clash = distance < 50
   )
 ```
 
