@@ -9,6 +9,16 @@ echo: True
 bibliography: bibliography.bib
 ---
 
+```{r}
+library(tidyverse)
+library(sf)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+library(readr)
+install.packages("plotly")
+library(plotly)
+```
 
 # Abstract {.unnumbered .unlisted}
 
@@ -89,3 +99,146 @@ my_age_1("1992-07-17", "hours")
 my_age_2("1992-07-17", "hours")
 ```
 
+# Tasks and inputs
+
+## Task 1: Write your own functions
+
+```{r}
+
+bmi <- function(weight, height) {
+    weight / height^2
+}
+
+fahrenheit <- function(celsius) {
+    celsius * 9/5 + 32
+}
+
+euclidean_distance <- function(x1, y1, x2, y2) {
+    sqrt((x2 - x1)^2 + (y2 - y1)^2)
+}
+
+bmi(70, 1.85)
+
+fahrenheit(-40)
+
+euclidean_distance(0, 0, 3, 4)
+
+```
+
+## Task 2: Prepare Analysis
+
+In the next tasks we will look for “meet” patterns in our wild boar data. To simplify this, we will only use a subset of our wild boar data: The individuals Rosa and Sabi for the timespan 01.04.2015 - 15.04.2015. Use the dataset wildschwein_BE_2056.csv (on moodle). Import the csv as a data.frame and filter it with the aforementioned criteria. You do not need to convert the data.frame to an sf object.
+
+```{r}
+wild_boar <- read_delim("wildschwein_BE_2056.csv")
+unique(wild_boar$TierName)
+
+wild_boar_2 <- wild_boar |> 
+    filter(TierName == c("Rosa", "Sabi"),
+           DatetimeUTC >= "2015-04-01",
+           DatetimeUTC <= "2015-04-15")
+unique(wild_boar_2$TierName)
+
+
+```
+
+something is odd with the filtered df Rosa is missing 00:00 und 00:30 values and Sabi is missing 00:15 and 00:45 values.
+Try with ohter technique.
+
+```{r}
+wild_boar_3 <- read_delim("wildschwein_BE_2056.csv") |> 
+  filter(TierName %in% c("Sabi","Rosa"),
+        DatetimeUTC >= ymd_hms("2015-04-01 00:00:00") & DatetimeUTC <= ymd_hms("2015-04-15 23:59:59")) 
+```
+
+
+## Task 3: Create Join Key
+
+Round Datetimes
+```{r}
+wild_boar_3$Datetime_round <- round_date(wild_boar_3$DatetimeUTC, unit = "15 mins")
+```
+
+
+## Task 4: Measuring distance at concurrent locations
+
+Split df
+```{r}
+sabi <- wild_boar_3 |> 
+  filter(TierName == "Sabi")
+
+rosa <- wild_boar_3 |> 
+  filter(TierName == "Rosa")
+```
+
+Join by date
+```{r}
+joined_df <- full_join(sabi, rosa, by = "Datetime_round", suffix = c("sabi", "rosa"))
+
+```
+
+### Calculate Euclidean distance
+```{r}
+joined_df <- joined_df |> 
+  mutate(
+    locsabi = st_sfc(mapply(function(x, y) st_point(c(x, y)), 
+                                joined_df$Esabi, joined_df$Nsabi, SIMPLIFY = FALSE),
+                         crs = 2056),
+    locrosa = st_sfc(mapply(function(x, y) st_point(c(x, y)), 
+                                joined_df$Erosa, joined_df$Nrosa, SIMPLIFY = FALSE),
+                         crs = 2056)) |> 
+    st_as_sf() |> 
+    mutate(
+      distance = as.numeric(st_distance(locrosa, locsabi, by_element = TRUE)))
+```
+
+### Apply Threshold of 100m
+```{r}
+joined_df <- joined_df |> 
+  mutate(
+    clash = distance < 100
+  )
+```
+
+
+
+## Task 5: Visualize data
+```{r}
+meets_sf <- joined_df %>% filter(clash)
+
+# Plot
+ggplot() +
+  # Plot rosa points
+  geom_point(data = rosa, aes(x = E, y = N, color = "Rosa Points"), alpha = 0.5, size = 2) +
+  
+  # Plot sabi points
+  geom_point(data = sabi, aes(x = E, y = N, color = "Sabi Points"), alpha = 0.5, size = 2) +
+  
+  # Plot meets (Esabi and Erosa)
+  geom_point(data = meets_sf, aes(x = Esabi, y = Nsabi, color = "Meet Points Sabi"), size = 4, shape = 18) +
+  geom_point(data = meets_sf, aes(x = Erosa, y = Nrosa, color = "Meet Points Rosa"), size = 4, shape = 18) +
+  
+  # Labels and theme
+  labs(title = "Spatial Visualization of Meets") +
+  theme_minimal() +
+  
+  # Manually set the colors for each group in the legend
+  scale_color_manual(
+    values = c("Rosa Points" = "blue", "Sabi Points" = "red", "Meet Points Sabi" = "green", "Meet Points Rosa" = "orange"),
+    name = "Point Type"
+  ) +
+  
+  # Adjusting legend position
+  theme(legend.position = "right")
+
+```
+
+
+## Task 6: Visualize as timecube
+```{r}
+fig <- plot_ly(joined_df, x = ~Esabi, y = ~Nsabi, z = ~Datetime_round, type = 'scatter3d', mode = 'lines', opacity = 1, line = list(width = 6, color = "blue")) |> 
+  add_trace(joined_df, x = ~Erosa, y = ~Nrosa, z = ~Datetime_round, type = 'scatter3d', mode = 'lines', opacity = 1, line = list(width = 6, color = "red"))
+
+
+fig
+```
